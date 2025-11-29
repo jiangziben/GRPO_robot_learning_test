@@ -1,3 +1,4 @@
 *.pth
 .vscode
 __pycache__
+requirements-envconfig-example.sh
