@@ -1,0 +1,6 @@
+torch>=2.0.0
+gym==0.25.2
+numpy==1.23.5
+matplotlib>=3.6.0
+tqdm>=4.0
+pygame>=2.0
