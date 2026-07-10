@@ -88,40 +88,28 @@ def calc_advantages_with_grpo(trajectories):
 def grpo_update(trajectories, net, optimizer, n_iterations=20, eps=0.2):
 
     # [1] 使用GRPO函数计算每个episode的标准化Advantage
-    advantages = calc_advantages_with_grpo(trajectories).unsqueeze(-1)
+    advantages = calc_advantages_with_grpo(trajectories).unsqueeze(-1)  # [batch_size, 1]
     # 将所有轨迹的数据合并成批处理
-    all_states = trajectories["all_states"]
-    all_log_probs = trajectories["all_log_probs"]
-    all_chosen_actions = trajectories["all_actions"]
-    batch_size = len(all_states)
+    all_states = trajectories["all_states"]          # [batch_size, num_steps, state_dim]
+    all_log_probs = trajectories["all_log_probs"]    # [batch_size, num_steps, 1]
+    all_chosen_actions = trajectories["all_actions"] # [batch_size, num_steps, 1]
+
     # [2] 更新Policy NN。进行n_iterations次更新
     for i_iter in range(n_iterations):
-        loss = 0
-        for i in range(len(all_states)):
-            states = all_states[i]
-            log_probs = all_log_probs[i]
-            chosen_actions = all_chosen_actions[i]
-            advantage = advantages[i]
-            trajectory_loss = 0                            # 初始化1个episode的损失为0
-            mu, sigma = net(states)
-            action_dist = torch.distributions.Normal(mu, sigma)
-            new_log_probs =  action_dist.log_prob(chosen_actions)
-            ratio = torch.exp(new_log_probs - log_probs)
-            surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1 - eps,
-                                1 + eps) * advantage  # 截断
-            trajectory_loss = torch.mean(-torch.min(surr1, surr2))
-            loss += trajectory_loss
+        mu, sigma = net(all_states)  # [B, T, 1]，nn.Linear自动处理3D输入
+        action_dist = torch.distributions.Normal(mu, sigma)
+        new_log_probs = action_dist.log_prob(all_chosen_actions)  # [B, T, 1]
+        ratio = torch.exp(new_log_probs - all_log_probs)          # [B, T, 1]
+        surr1 = ratio * advantages.unsqueeze(1)  # advantages: [B, 1] → [B, 1, 1]
+        surr2 = torch.clamp(ratio, 1 - eps, 1 + eps) * advantages.unsqueeze(1)  # 截断
+        loss = torch.mean(-torch.min(surr1, surr2))
 
-        # [5] 用episode数进行归一化
-        loss /= batch_size
-
-        # [6] 更新Policy NN的权重
+        # [3] 更新Policy NN的权重
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-    return loss.item()  # 不返回任何内容
+    return loss.item()
 
 # [1] 初始化和初始设置
 group_size = 100
@@ -133,14 +121,14 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 policy = PolicyNetContinuous(state_dim, n_actions).to(device)
 optimizer = torch.optim.Adam(policy.parameters(), lr=0.001)
 max_steps = 500
-# [3] 进行100次episode循环
-episode_num = 500  # 轨迹数
+# [3] 进行500次iteration循环
+iteration_num = 500  
 start = time.time()
 count = 0
 return_list = []
-# [4] 开始100次episode循环
-for i_episode in tqdm(range(episode_num)):  
-    # [5] 使用GRPO积累轨迹（25次episode）
+# [4] 开始500次iteration循环
+for iter in tqdm(range(iteration_num)):  
+    # [5] 使用GRPO积累轨迹
     trajectories,episode_rewards = collect_trajectory_vectorized(envs,policy,max_steps,device=device)
 
     # [6] 使用GRPO更新PolicyNet的权重
@@ -149,15 +137,12 @@ for i_episode in tqdm(range(episode_num)):
     # [7] 计算平均奖励
     avg_reward = sum(episode_rewards) / len(episode_rewards)
     return_list.append(avg_reward.cpu().numpy())
-    if i_episode !=0 and i_episode % 200 == 0:
-        save_path = f"./weights/grpo_pendulum_policy_update_{i_episode}.pth"
+    if iter !=0 and iter % 200 == 0:
+        save_path = f"./weights/grpo_pendulum_policy_update_{iter}.pth"
         torch.save(policy.state_dict(), save_path)
         print(f"Model saved to {save_path}")
-    print(f'第 {i_episode} 次试验, avg reward: {avg_reward:.2f}')    
-    # # [8] 提前结束判定
-    # if avg_reward > max_steps-5:
-    #     print('训练完成。试验次数: ', i_episode)
-    #     break
+    print(f'第 {iter} 次试验, avg reward: {avg_reward:.2f}')    
+
 print("used_time(s): ", time.time() - start)
 
 save_path = f"./weights/grpo_pendulum_policy_update_final.pth"
