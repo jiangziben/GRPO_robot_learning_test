@@ -1,0 +1,14 @@
+{
+    "algo": "ppo",
+    "env": "cartpole",
+    "save_path": "weights/ppo_cartpole_policy_final.pth",
+    "num_envs": 20,
+    "iteration_num": 200,
+    "max_steps": 500,
+    "actor_lr": 0.001,
+    "critic_lr": 0.01,
+    "n_iterations": 10,
+    "eps": 0.2,
+    "gamma": 0.98,
+    "lmbda": 0.95
+}

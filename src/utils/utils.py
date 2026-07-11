@@ -79,3 +79,98 @@ def collect_trajectories(envs, policy, num_steps=500, discrete=True,
     }
     episode_rewards = normalized_rewards * num_steps
     return trajectories, episode_rewards
+
+
+# ==========================================================================
+# PPO 轨迹收集（需要记录每步 reward / done / next_state，用于 GAE）
+# ==========================================================================
+
+def collect_ppo_trajectories(envs, policy, num_steps=500, discrete=True,
+                              device="cpu", reward_fn=None):
+    """从 vectorized 环境并行收集轨迹（PPO 专用，保留每步 transition 信息）。
+
+    Args:
+        envs:       Gym vectorized 环境
+        policy:     策略网络
+        num_steps:  每条轨迹最大步数
+        discrete:   True=离散动作，False=连续动作
+        device:     计算设备
+        reward_fn:  环境特定的奖励变换函数，
+                    签名: fn(next_states, rewards, dones, all_dones) -> rewards
+
+    Returns:
+        trajectories:   dict，包含 all_states, all_next_states, all_log_probs,
+                        all_actions, all_rewards, all_dones
+        episode_rewards: [group_size] 每个并行环境的累计奖励（用于日志）
+    """
+    group_size = envs.num_envs
+    seed_num = np.random.randint(0, 1000)
+    states = envs.reset(seed=[seed_num] * group_size)
+
+    all_states = []
+    all_next_states = []
+    all_actions = []
+    all_log_probs = []
+    all_rewards = []      # 每步奖励
+    all_dones = []        # 每步终止标志
+    all_episode_rewards = torch.zeros(group_size)   # 累计奖励
+    all_episode_dones = torch.tensor([False] * group_size)  # 累积终止
+
+    for _ in range(num_steps):
+        states_tensor = torch.tensor(states, dtype=torch.float32, device=device)
+
+        if discrete:
+            probs = policy(states_tensor)
+            dist = Categorical(probs)
+            actions = dist.sample()
+            log_probs = dist.log_prob(actions).detach()
+        else:
+            mu, sigma = policy(states_tensor)
+            dist = Normal(mu, sigma)
+            actions = dist.sample()
+            log_probs = dist.log_prob(actions).detach()
+
+        next_states, rewards, dones, infos = envs.step(actions.cpu().numpy())
+
+        all_states.append(states)
+        all_next_states.append(next_states)
+        all_actions.append(actions)
+        all_log_probs.append(log_probs)
+
+        all_episode_dones[dones] = True
+        if reward_fn is not None:
+            rewards = reward_fn(next_states, rewards, dones, all_episode_dones)
+        all_rewards.append(torch.tensor(rewards, dtype=torch.float32))
+        all_dones.append(torch.tensor(dones, dtype=torch.float32))
+        all_episode_rewards += rewards
+
+        states = next_states
+        if torch.all(all_episode_dones):
+            break
+
+    T = len(all_states)
+    all_states = torch.tensor(np.array(all_states), dtype=torch.float32,
+                              device=device).permute(1, 0, 2)          # [B, T, state_dim]
+    all_next_states = torch.tensor(np.array(all_next_states), dtype=torch.float32,
+                                   device=device).permute(1, 0, 2)    # [B, T, state_dim]
+    all_rewards = torch.stack(all_rewards, dim=0).permute(1, 0).to(device)   # [B, T]
+    all_dones = torch.stack(all_dones, dim=0).permute(1, 0).to(device)       # [B, T]
+
+    if discrete:
+        all_log_probs = torch.stack(all_log_probs).permute(1, 0).to(device)    # [B, T]
+        all_actions = torch.stack(all_actions).permute(1, 0).to(device)        # [B, T]
+    else:
+        all_log_probs = torch.stack(all_log_probs).permute(1, 0, 2).to(device) # [B, T, act_dim]
+        all_actions = torch.stack(all_actions).permute(1, 0, 2).to(device)     # [B, T, act_dim]
+
+    trajectories = {
+        "all_states": all_states,
+        "all_next_states": all_next_states,
+        "all_log_probs": all_log_probs,
+        "all_actions": all_actions,
+        "all_rewards": all_rewards,
+        "all_dones": all_dones,
+    }
+    # episode_rewards 直接使用累积奖励（不除以 max_steps）
+    episode_rewards = all_episode_rewards
+    return trajectories, episode_rewards
