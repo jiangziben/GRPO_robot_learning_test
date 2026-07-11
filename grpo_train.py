@@ -13,8 +13,10 @@ from tqdm import tqdm
 import torch
 import gym
 
-from grpo import GRPO, collect_trajectories
-from model import PolicyNet, PolicyNetContinuous
+from src.rl.grpo import GRPO
+from src.utils.utils import collect_trajectories
+from src.model.carpole_policy import PolicyNet
+from src.model.pendulum_policy import PolicyNetContinuous
 
 
 # ---------------------------------------------------------------------------

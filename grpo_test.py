@@ -9,7 +9,8 @@ import argparse
 import gym
 import torch
 import matplotlib.pyplot as plt
-from model import PolicyNet, PolicyNetContinuous
+from src.model.carpole_policy import PolicyNet
+from src.model.pendulum_policy import PolicyNetContinuous
 
 
 ENV_CONFIGS = {
