@@ -69,13 +69,17 @@ def test(env_name: str, model_path: str, num_episodes: int = 10):
         print(f"Episode {ep+1}: Total Reward = {total_reward:.2f}, Steps = {steps}")
     env.close()
 
+    os.makedirs("output", exist_ok=True)
+    fig_path = f"output/{env_name}_test.png"
     plt.figure(figsize=(8, 4))
     plt.plot(range(1, num_episodes + 1), episode_rewards, marker="o", linestyle="-")
     plt.xlabel("Episode")
     plt.ylabel("Total Reward")
     plt.title(f"Test Rewards on {meta['env_name']}")
     plt.grid(True)
-    plt.show()
+    plt.savefig(fig_path)
+    plt.close()
+    print(f"Figure saved to {fig_path}")
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ ENV_META = {
         "policy_cls": PolicyNetContinuous,
         "discrete": False,
         "reward_fn": {
-            "grpo": lambda ns, r, _d, _ad: r + ns[:, 0],
+            "grpo": lambda ns, r, _d, _ad: (r + 8.0) / 8.0,
             "ppo":  lambda ns, r, _d, _ad: (r + 8.0) / 8.0,
         },
     },
@@ -105,7 +105,8 @@ def train(algo: str, env_name: str, cfg: dict):
         optimizer = torch.optim.Adam(policy.parameters(), lr=cfg["lr"])
         algo_inst = GRPO(optimizer, eps=cfg["eps"],
                          n_iterations=cfg["n_iterations"],
-                         discrete=discrete)
+                         discrete=discrete,
+                         entropy_coef=cfg.get("entropy_coef", 0.0))
     else:  # ppo
         critic = ValueNet(state_dim).to(device)
         actor_optimizer = torch.optim.Adam(policy.parameters(), lr=cfg["actor_lr"])
@@ -156,12 +157,16 @@ def train(algo: str, env_name: str, cfg: dict):
 
     envs.close()
 
+    os.makedirs("output", exist_ok=True)
+    fig_path = f"output/{algo}_{env_name}_train.png"
     plt.plot(range(len(return_list)), return_list)
     plt.xlabel("Iterations")
     plt.ylabel("Avg Return")
     plt.title(f"{algo.upper()} on {meta['env_name']}")
     plt.grid(True)
-    plt.show()
+    plt.savefig(fig_path)
+    plt.close()
+    print(f"Figure saved to {fig_path}")
 
 
 if __name__ == "__main__":

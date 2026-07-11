@@ -1,8 +1,8 @@
-# GRPO vs PPO: 强化学习算法对比实验
+# GRPO & PPO 强化学习算法对比实验
 
-本项目实现了 **GRPO（Group Relative Policy Optimization，组相对策略优化）** 与 **PPO（Proximal Policy Optimization，近端策略优化）** 两种强化学习算法，并在经典 Gym 控制环境中进行对比实验。
+本项目实现了 **GRPO（Group Relative Policy Optimization）** 与 **PPO（Proximal Policy Optimization）** 两种强化学习算法，在经典 Gym 控制环境中进行对比实验。
 
-GRPO 是 DeepSeek-R1 中使用的强化学习算法，其核心思想是**无需 Critic 网络**，通过对同一组内多个 episode 的累积奖励进行组内归一化来计算优势函数，从而简化训练流程。
+GRPO 是 DeepSeek-R1 中使用的强化学习算法，核心思想是**无需 Critic 网络**，通过对同一组内多个 episode 的累积奖励进行组内归一化来计算优势函数，从而简化训练流程。
 
 ## 环境
 
@@ -16,9 +16,10 @@ GRPO 是 DeepSeek-R1 中使用的强化学习算法，其核心思想是**无需
 | 特性 | PPO | GRPO |
 |------|-----|------|
 | 网络架构 | Actor-Critic（策略网络 + 价值网络） | 仅策略网络（无 Critic） |
-| 优势估计 | GAE（广义优势估计） | 组内奖励归一化（Z-score） |
-| 并行采样 | 单环境串行采样 | 多环境向量化并行采样 |
-| 超参数数量 | 较多（需调节 Actor/Critic 学习率等） | 较少（仅需调节策略网络学习率） |
+| 优势估计 | GAE（广义优势估计，per-step） | 组内奖励归一化（Z-score，per-episode） |
+| 并行采样 | 向量化并行采样 | 向量化并行采样 |
+| 超参数 | 较多（Actor/Critic 学习率、γ、λ） | 较少（策略学习率、熵系数） |
+| 适用场景 | 通用（离散/连续动作均稳定） | 离散动作效果好，连续动作需熵正则 |
 
 ### GRPO 优势计算
 
@@ -30,23 +31,26 @@ $$\text{Advantage} = \frac{R_i - \mu_R}{\sigma_R + \epsilon}$$
 
 ```
 .
-├── rl_utils.py                  # 共享工具模块（训练循环、GAE、经验回放缓冲区）
-├── grpo_train_cartpole.py       # GRPO 在 CartPole 上的训练脚本
-├── grpo_train_pendulum.py       # GRPO 在 Pendulum 上的训练脚本
-├── ppo_train_cartpole.py        # PPO 在 CartPole 上的训练脚本
-├── ppo_train_pendulum.py        # PPO 在 Pendulum 上的训练脚本
-├── grpo_test_cartpole.py        # GRPO CartPole 评估脚本
-├── grpo_test_pendulum.py        # GRPO Pendulum 评估脚本
-├── ppo_test_cartpole.py         # PPO CartPole 评估脚本
-├── ppo_test_pendulum.py         # PPO Pendulum 评估脚本
-├── doc/                         # 实验结果（GIF 动图 & 奖励曲线）
-│   ├── result_grpo_wo_pos_reward.gif
-│   ├── result_grpo_w_pos_reward.gif
-│   ├── result_ppo_wo_pos_reward.gif
-│   ├── return_grpo_wo_pos_reward_26.56s.png
-│   ├── return_grpo_w_pos_reward_24.16s.png
-│   └── return_ppo_wo_pos_reward_77.53s.png
-└── weights/                     # 保存的模型权重（*.pth，已 gitignore）
+├── train.py                      # 统一训练脚本
+├── test.py                       # 统一测试脚本
+├── config/                       # 配置文件（超参、algo、env）
+│   ├── grpo_cartpole.json
+│   ├── grpo_pendulum.json
+│   ├── ppo_cartpole.json
+│   └── ppo_pendulum.json
+├── src/
+│   ├── model/                    # 策略/价值网络
+│   │   ├── carpole_policy.py     # PolicyNet（离散）
+│   │   ├── pendulum_policy.py    # PolicyNetContinuous（连续）
+│   │   └── value_net.py          # ValueNet（PPO Critic）
+│   ├── rl/                       # 算法实现
+│   │   ├── grpo.py               # GRPO 类
+│   │   └── ppo.py                # PPO 类 + GAE
+│   └── utils/
+│       └── utils.py              # 轨迹收集工具函数
+├── output/                       # 训练/测试结果图（自动生成）
+├── weights/                      # 模型权重（gitignore）
+└── doc/                          # 实验素材
 ```
 
 ## 环境配置
@@ -54,7 +58,7 @@ $$\text{Advantage} = \frac{R_i - \mu_R}{\sigma_R + \epsilon}$$
 ### 依赖
 
 - Python 3.9+
-- PyTorch 2.7+
+- PyTorch 2.0+
 - Gym 0.25.2
 - NumPy 1.23.5（必须锁定版本，gym 0.25.2 不兼容 NumPy 2.x / 1.24+）
 - Matplotlib
@@ -64,11 +68,8 @@ $$\text{Advantage} = \frac{R_i - \mu_R}{\sigma_R + \epsilon}$$
 ### 安装
 
 ```bash
-# 创建 conda 环境
 conda create -n grpo-rl python=3.9 -y
 conda activate grpo-rl
-
-# 安装依赖
 pip install -r requirements.txt
 ```
 
@@ -77,30 +78,51 @@ pip install -r requirements.txt
 ### 训练
 
 ```bash
-# GRPO 训练
-python grpo_train_cartpole.py      # CartPole（离散动作）
-python grpo_train_pendulum.py      # Pendulum（连续动作）
+# 使用配置文件运行训练（algo 和 env 在配置文件中指定）
+python train.py --config grpo_cartpole.json
+python train.py --config grpo_pendulum.json
+python train.py --config ppo_cartpole.json
+python train.py --config ppo_pendulum.json
 
-# PPO 训练
-python ppo_train_cartpole.py       # CartPole（离散动作）
-python ppo_train_pendulum.py       # Pendulum（连续动作）
+# 不传 --config 默认使用 grpo_cartpole.json
+python train.py
 ```
 
-训练完成后，模型权重将保存至 `./weights/` 目录。
+训练完成后的输出：
+- 模型权重：`weights/{algo}_{env}_policy_final.pth`
+- 奖励曲线：`output/{algo}_{env}_train.png`
 
-### 评估
+### 测试
 
 ```bash
-# GRPO 评估（需先完成训练）
-python grpo_test_cartpole.py
-python grpo_test_pendulum.py
+# 使用配置文件运行测试（--model 可选，默认用配置文件中的 save_path）
+python test.py --config grpo_cartpole.json
+python test.py --config ppo_pendulum.json --model weights/my_model.pth
 
-# PPO 评估（需先完成训练）
-python ppo_test_cartpole.py
-python ppo_test_pendulum.py
+# 不传 --config 默认使用 grpo_cartpole.json
+python test.py --model weights/grpo_cartpole_policy_final.pth
 ```
 
-评估脚本会加载训练好的模型，在环境中运行 10 个 episode 并渲染可视化，同时绘制每个 episode 的累积奖励曲线。
+测试完成后的输出：
+- 测试奖励曲线：`output/{env}_test.png`
+
+### 配置文件格式
+
+每个配置文件自包含 algo、env 及所有超参，示例（`config/grpo_cartpole.json`）：
+
+```json
+{
+    "algo": "grpo",
+    "env": "cartpole",
+    "save_path": "weights/grpo_cartpole_policy_final.pth",
+    "num_envs": 20,
+    "iteration_num": 100,
+    "max_steps": 500,
+    "lr": 0.02,
+    "n_iterations": 20,
+    "eps": 0.2
+}
+```
 
 ## 超参数
 
@@ -108,42 +130,32 @@ python ppo_test_pendulum.py
 
 | 参数 | CartPole | Pendulum |
 |------|----------|----------|
-| group_size | 10 | 100 |
-| 训练轮数 (episodes) | 50 | 500 |
-| 最大步数 | 500 | 500 |
-| 学习率 (lr) | 0.02 | 0.001 |
-| PPO Clip (ε) | 0.2 | 0.2 |
-| 更新迭代次数 | 20 | 20 |
+| num_envs | 20 | 100 |
+| iteration_num | 100 | 500 |
+| max_steps | 500 | 500 |
+| lr | 0.02 | 0.001 |
+| n_iterations | 20 | 20 |
+| eps | 0.2 | 0.2 |
+| entropy_coef | 0（不需要） | 0.01（防 sigma 坍缩） |
 
 ### PPO
 
 | 参数 | CartPole | Pendulum |
 |------|----------|----------|
-| 训练轮数 (episodes) | 500 | 5000 |
-| Actor 学习率 | 1e-3 | 1e-4 |
-| Critic 学习率 | 1e-2 | 5e-3 |
-| Gamma (γ) | 0.98 | 0.9 |
-| Lambda (λ) | 0.95 | 0.9 |
-| PPO Clip (ε) | 0.2 | 0.2 |
-| 更新轮数 (epochs) | 10 | 10 |
+| num_envs | 20 | 20 |
+| iteration_num | 200 | 500 |
+| max_steps | 500 | 500 |
+| actor_lr | 0.001 | 0.0001 |
+| critic_lr | 0.01 | 0.005 |
+| n_iterations | 10 | 10 |
+| eps | 0.2 | 0.2 |
+| gamma | 0.98 | 0.9 |
+| lmbda | 0.95 | 0.9 |
 
-## 实验结果
+## 已知局限
 
-以下为 CartPole-v1 环境下的训练结果对比：
-
-### 奖励曲线
-
-| GRPO（无位置奖励, 26.56s） | GRPO（有位置奖励, 24.16s） | PPO（无位置奖励, 77.53s） |
-|:---:|:---:|:---:|
-| ![GRPO without pos reward](doc/return_grpo_wo_pos_reward_26.56s.png) | ![GRPO with pos reward](doc/return_grpo_w_pos_reward_24.16s.png) | ![PPO without pos reward](doc/return_ppo_wo_pos_reward_77.53s.png) |
-
-### 训练效果演示
-
-| GRPO（无位置奖励） | GRPO（有位置奖励） | PPO（无位置奖励） |
-|:---:|:---:|:---:|
-| ![GRPO wo pos](doc/result_grpo_wo_pos_reward.gif) | ![GRPO w pos](doc/result_grpo_w_pos_reward.gif) | ![PPO wo pos](doc/result_ppo_wo_pos_reward.gif) |
-
-> **位置奖励**：在 CartPole 环境中额外添加了 `-abs(cart_position)` 惩罚项，鼓励小车保持在轨道中心附近。
+- **GRPO + Pendulum**：由于 Pendulum 是长时域（200 步）连续控制任务，GRPO 仅用最终 episode reward 做组内比较，缺少 per-step 信用分配，训练存在随机种子敏感性。加入熵正则（`entropy_coef=0.01`）可缓解策略坍缩，但稳定性仍不如 PPO + GAE。
+- **GRPO + CartPole**：训练稳定，收敛快，是 GRPO 的理想适用场景。
 
 ## 参考资料
 

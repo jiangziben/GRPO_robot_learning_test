@@ -24,11 +24,13 @@ class GRPO:
         discrete:    True=离散动作，False=连续动作
     """
 
-    def __init__(self, optimizer, eps=0.2, n_iterations=20, discrete=True):
+    def __init__(self, optimizer, eps=0.2, n_iterations=20, discrete=True,
+                 entropy_coef=0.0):
         self.optimizer = optimizer
         self.eps = eps
         self.n_iterations = n_iterations
         self.discrete = discrete
+        self.entropy_coef = entropy_coef
 
     # ------------------------------------------------------------------
     # Advantage 计算
@@ -65,6 +67,7 @@ class GRPO:
         for _ in range(self.n_iterations):
             if self.discrete:
                 probs = policy(all_states)                                        # [B, T, n_actions]
+                dist = torch.distributions.Categorical(probs)
                 new_log_probs = torch.log(probs.gather(-1, all_actions.unsqueeze(-1)))  # [B, T, 1]
                 old_log_probs = all_log_probs.unsqueeze(-1)                      # [B, T, 1]
             else:
@@ -77,7 +80,8 @@ class GRPO:
             adv = advantages.unsqueeze(1)                                        # [B, 1, 1]
             surr1 = ratio * adv
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * adv
-            loss = torch.mean(-torch.min(surr1, surr2))
+            entropy = dist.entropy().mean()                                      # 熵正则
+            loss = torch.mean(-torch.min(surr1, surr2)) - self.entropy_coef * entropy
 
             self.optimizer.zero_grad()
             loss.backward()

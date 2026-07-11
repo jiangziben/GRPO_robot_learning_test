@@ -7,5 +7,6 @@
     "max_steps": 500,
     "lr": 0.001,
     "n_iterations": 20,
-    "eps": 0.2
+    "eps": 0.2,
+    "entropy_coef": 0.01
 }
