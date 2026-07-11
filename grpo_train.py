@@ -69,7 +69,7 @@ def train(env_name: str):
 
     policy = cfg["policy_cls"](state_dim, n_actions).to(device)
     optimizer = torch.optim.Adam(policy.parameters(), lr=cfg["lr"])
-    grpo = GRPO(policy, optimizer, eps=0.2, n_iterations=20, discrete=cfg["discrete"])
+    grpo = GRPO(optimizer, eps=0.2, n_iterations=20, discrete=cfg["discrete"])
 
     return_list = []
     start = time.time()
@@ -80,7 +80,7 @@ def train(env_name: str):
             discrete=cfg["discrete"], device=device,
             reward_fn=cfg["reward_fn"],
         )
-        loss = grpo.update(trajectories)
+        loss = grpo.update(policy, trajectories)
 
         avg_reward = sum(episode_rewards) / len(episode_rewards)
         return_list.append(avg_reward.cpu().numpy())

@@ -97,18 +97,16 @@ def collect_trajectories(envs, policy, num_steps=500, discrete=True,
 # ==========================================================================
 
 class GRPO:
-    """GRPO 算法封装类（纯算法，不依赖环境）。
+    """GRPO 算法封装类（纯算法，不依赖环境和模型）。
 
     Args:
-        policy:      策略网络（nn.Module）
         optimizer:   PyTorch 优化器
         eps:         PPO 截断参数
         n_iterations: 每次 update 的更新轮数
         discrete:    True=离散动作，False=连续动作
     """
 
-    def __init__(self, policy, optimizer, eps=0.2, n_iterations=20, discrete=True):
-        self.policy = policy
+    def __init__(self, optimizer, eps=0.2, n_iterations=20, discrete=True):
         self.optimizer = optimizer
         self.eps = eps
         self.n_iterations = n_iterations
@@ -131,10 +129,11 @@ class GRPO:
         std = torch.std(rewards) + 1e-8
         return (rewards - mean) / std
 
-    def update(self, trajectories):
+    def update(self, policy, trajectories):
         """使用 PPO 截断损失更新策略网络。
 
         Args:
+            policy:       策略网络（nn.Module）
             trajectories: collect_trajectories 返回的 dict
 
         Returns:
@@ -147,11 +146,11 @@ class GRPO:
 
         for _ in range(self.n_iterations):
             if self.discrete:
-                probs = self.policy(all_states)                                  # [B, T, n_actions]
+                probs = policy(all_states)                                        # [B, T, n_actions]
                 new_log_probs = torch.log(probs.gather(-1, all_actions.unsqueeze(-1)))  # [B, T, 1]
                 old_log_probs = all_log_probs.unsqueeze(-1)                      # [B, T, 1]
             else:
-                mu, sigma = self.policy(all_states)                              # [B, T, act_dim]
+                mu, sigma = policy(all_states)                                    # [B, T, act_dim]
                 dist = Normal(mu, sigma)
                 new_log_probs = dist.log_prob(all_actions)                       # [B, T, act_dim]
                 old_log_probs = all_log_probs
