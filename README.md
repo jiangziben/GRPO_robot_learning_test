@@ -44,8 +44,8 @@ $$\text{Advantage} = \frac{R_i - \mu_R}{\sigma_R + \epsilon}$$
 │   │   ├── cartpole.py            #   CartPoleEnv：reward = 原始 reward + 中心惩罚
 │   │   └── pendulum.py            #   PendulumEnv：reward = (r + 8) / 8
 │   ├── policy/                    # 策略/价值网络
-│   │   ├── carpole_policy.py      #   PolicyNet（离散）
-│   │   ├── pendulum_policy.py     #   PolicyNetContinuous（连续）
+│   │   ├── discrete_policy.py     #   PolicyNet（离散）
+│   │   ├── continuous_policy.py   #   PolicyNetContinuous（连续）
 │   │   └── value_net.py           #   ValueNet（PPO Critic）
 │   └── rl/                        # 强化学习算法
 │       ├── grpo.py                #   GRPO：组内标准化 + PPO clip + 熵正则

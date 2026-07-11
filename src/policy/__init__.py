@@ -1,7 +1,7 @@
-"""模型模块。"""
+"""策略模块。"""
 
-from .carpole_policy import PolicyNet
-from .pendulum_policy import PolicyNetContinuous
+from .discrete_policy import PolicyNet
+from .continuous_policy import PolicyNetContinuous
 
 POLICY_REGISTRY = {
     "PolicyNet": PolicyNet,
