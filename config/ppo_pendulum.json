@@ -1,6 +1,7 @@
 {
     "algo": "ppo",
     "env": "pendulum",
+    "policy": "PolicyNetContinuous",
     "save_path": "weights/ppo_pendulum_policy_final.pth",
     "num_envs": 20,
     "iteration_num": 500,

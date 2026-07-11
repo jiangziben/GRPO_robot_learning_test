@@ -11,47 +11,15 @@ import argparse
 import json
 import os
 import time
-import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import torch
-import gym
 
+from src.env import ENV_REGISTRY
+from src.policy import POLICY_REGISTRY
 from src.rl.grpo import GRPO
 from src.rl.ppo import PPO
-from src.utils.utils import collect_trajectories, collect_ppo_trajectories
-from src.model.carpole_policy import PolicyNet
-from src.model.pendulum_policy import PolicyNetContinuous
-from src.model.value_net import ValueNet
-
-
-# ---------------------------------------------------------------------------
-# 环境元信息（结构性配置，不适合放 JSON）
-# ---------------------------------------------------------------------------
-ENV_META = {
-    "cartpole": {
-        "env_name": "CartPole-v1",
-        "policy_cls": PolicyNet,
-        "discrete": True,
-        "reward_fn": lambda ns, r, _d, ad: _cartpole_reward(ns, r, ad),
-    },
-    "pendulum": {
-        "env_name": "Pendulum-v1",
-        "policy_cls": PolicyNetContinuous,
-        "discrete": False,
-        "reward_fn": {
-            "grpo": lambda ns, r, _d, _ad: (r + 8.0) / 8.0,
-            "ppo":  lambda ns, r, _d, _ad: (r + 8.0) / 8.0,
-        },
-    },
-}
-
-
-def _cartpole_reward(next_states, rewards, all_dones):
-    rewards = rewards.copy()
-    rewards[all_dones.numpy()] = 0
-    rewards += -np.abs(next_states[:, 0])
-    return rewards
+from src.policy.value_net import ValueNet
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +36,7 @@ def load_json(path: str) -> dict:
 def load_config(config_file: str) -> dict:
     """读取配置文件。若为相对/绝对路径则直接使用，否则在 config/ 目录下查找。"""
     if os.path.sep in config_file or os.path.altsep in config_file:
-        path = config_file  # 已包含路径
+        path = config_file
     else:
         path = os.path.join(CONFIG_DIR, config_file)
     return load_json(path)
@@ -78,63 +46,48 @@ def load_config(config_file: str) -> dict:
 # 训练入口
 # ---------------------------------------------------------------------------
 def train(algo: str, env_name: str, cfg: dict):
-    meta = ENV_META[env_name]
+    env_cls = ENV_REGISTRY[env_name]
+    env = env_cls(num_envs=cfg["num_envs"])
+    policy_cls = POLICY_REGISTRY[cfg["policy"]]
 
-    print(f"Training {algo.upper()} on {meta['env_name']}")
+    print(f"Training {algo.upper()} on {env_cls.env_name}  [{cfg['policy']}]")
     for k, v in cfg.items():
         print(f"  {k}: {v}")
 
-    discrete = meta["discrete"]
-    num_envs = cfg["num_envs"]
     max_steps = cfg["max_steps"]
     iteration_num = cfg["iteration_num"]
-
-    envs = gym.vector.make(meta["env_name"], num_envs=num_envs)
-    state_dim = envs.single_observation_space.shape[0]
-    n_actions = (envs.single_action_space.n if discrete
-                 else envs.single_action_space.shape[0])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    policy = meta["policy_cls"](state_dim, n_actions).to(device)
-
-    reward_fn = meta["reward_fn"]
-    if isinstance(reward_fn, dict):
-        reward_fn = reward_fn[algo]
+    policy = policy_cls(env.state_dim, env.action_dim).to(device)
 
     if algo == "grpo":
         optimizer = torch.optim.Adam(policy.parameters(), lr=cfg["lr"])
         algo_inst = GRPO(optimizer, eps=cfg["eps"],
                          n_iterations=cfg["n_iterations"],
-                         discrete=discrete,
+                         discrete=env_cls.discrete,
                          entropy_coef=cfg.get("entropy_coef", 0.0))
     else:  # ppo
-        critic = ValueNet(state_dim).to(device)
+        critic = ValueNet(env.state_dim).to(device)
         actor_optimizer = torch.optim.Adam(policy.parameters(), lr=cfg["actor_lr"])
         critic_optimizer = torch.optim.Adam(critic.parameters(), lr=cfg["critic_lr"])
         algo_inst = PPO(actor_optimizer, critic_optimizer,
                         eps=cfg["eps"], gamma=cfg["gamma"],
                         lmbda=cfg["lmbda"],
                         n_iterations=cfg["n_iterations"],
-                        discrete=discrete)
+                        discrete=env_cls.discrete)
 
     return_list = []
     start = time.time()
 
     for i_iter in tqdm(range(iteration_num)):
         if algo == "grpo":
-            trajectories, episode_rewards = collect_trajectories(
-                envs, policy, max_steps,
-                discrete=discrete, device=device,
-                reward_fn=reward_fn,
-            )
+            trajectories, episode_rewards = env.collect_trajectories(
+                policy, max_steps, device=device)
             loss = algo_inst.update(policy, trajectories)
             log_str = f"loss: {loss:.4f}"
         else:  # ppo
-            trajectories, episode_rewards = collect_ppo_trajectories(
-                envs, policy, max_steps,
-                discrete=discrete, device=device,
-                reward_fn=reward_fn,
-            )
+            trajectories, episode_rewards = env.collect_step_data(
+                policy, max_steps, device=device)
             actor_loss, critic_loss = algo_inst.update(policy, critic, trajectories)
             log_str = f"actor_loss: {actor_loss:.4f}, critic_loss: {critic_loss:.4f}"
 
@@ -155,14 +108,14 @@ def train(algo: str, env_name: str, cfg: dict):
     torch.save(policy.state_dict(), cfg["save_path"])
     print(f"Model saved to {cfg['save_path']}")
 
-    envs.close()
+    env.close()
 
     os.makedirs("output", exist_ok=True)
     fig_path = f"output/{algo}_{env_name}_train.png"
     plt.plot(range(len(return_list)), return_list)
     plt.xlabel("Iterations")
     plt.ylabel("Avg Return")
-    plt.title(f"{algo.upper()} on {meta['env_name']}")
+    plt.title(f"{algo.upper()} on {env_cls.env_name}")
     plt.grid(True)
     plt.savefig(fig_path)
     plt.close()

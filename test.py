@@ -14,25 +14,9 @@ import gym
 import torch
 import matplotlib.pyplot as plt
 
-from src.model.carpole_policy import PolicyNet
-from src.model.pendulum_policy import PolicyNetContinuous
+from src.env import ENV_REGISTRY
+from src.policy import POLICY_REGISTRY
 
-
-# ---------------------------------------------------------------------------
-# 环境元信息
-# ---------------------------------------------------------------------------
-ENV_META = {
-    "cartpole": {
-        "env_name": "CartPole-v1",
-        "policy_cls": PolicyNet,
-        "discrete": True,
-    },
-    "pendulum": {
-        "env_name": "Pendulum-v1",
-        "policy_cls": PolicyNetContinuous,
-        "discrete": False,
-    },
-}
 
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
 
@@ -40,16 +24,16 @@ CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
 # ---------------------------------------------------------------------------
 # 测试入口
 # ---------------------------------------------------------------------------
-def test(env_name: str, model_path: str, num_episodes: int = 10):
-    meta = ENV_META[env_name]
+def test(env_name: str, policy_name: str, model_path: str, num_episodes: int = 10):
+    env_cls = ENV_REGISTRY[env_name]
+    policy_cls = POLICY_REGISTRY[policy_name]
 
-    env = gym.make(meta["env_name"], render_mode="human")
-    state_dim = env.observation_space.shape[0]
-    n_actions = (env.action_space.n if meta["discrete"]
-                 else env.action_space.shape[0])
+    env = gym.make(env_cls.env_name, render_mode="human")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    policy = meta["policy_cls"](state_dim, n_actions).to(device)
+    policy = policy_cls(env.observation_space.shape[0],
+                         (env.action_space.n if env_cls.discrete
+                          else env.action_space.shape[0])).to(device)
     policy.load_state_dict(torch.load(model_path, map_location=device))
     policy.eval()
 
@@ -75,7 +59,7 @@ def test(env_name: str, model_path: str, num_episodes: int = 10):
     plt.plot(range(1, num_episodes + 1), episode_rewards, marker="o", linestyle="-")
     plt.xlabel("Episode")
     plt.ylabel("Total Reward")
-    plt.title(f"Test Rewards on {meta['env_name']}")
+    plt.title(f"Test Rewards on {env_cls.env_name}")
     plt.grid(True)
     plt.savefig(fig_path)
     plt.close()
@@ -100,4 +84,4 @@ if __name__ == "__main__":
         cfg = json.load(f)
 
     model_path = args.model or cfg["save_path"]
-    test(cfg["env"], model_path, args.episodes)
+    test(cfg["env"], cfg["policy"], model_path, args.episodes)

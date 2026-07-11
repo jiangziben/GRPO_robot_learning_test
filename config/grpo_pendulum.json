@@ -1,6 +1,7 @@
 {
     "algo": "grpo",
     "env": "pendulum",
+    "policy": "PolicyNetContinuous",
     "save_path": "weights/grpo_pendulum_policy_final.pth",
     "num_envs": 100,
     "iteration_num": 500,

@@ -1,6 +1,7 @@
 {
     "algo": "ppo",
     "env": "cartpole",
+    "policy": "PolicyNet",
     "save_path": "weights/ppo_cartpole_policy_final.pth",
     "num_envs": 20,
     "iteration_num": 200,
