@@ -13,3 +13,8 @@ class CartPoleEnv(BaseEnv):
         rewards = rewards.copy()
         rewards += -np.abs(next_states[:, 0])
         return rewards
+
+    @staticmethod
+    def is_success(state, steps: int, done: bool) -> bool:
+        # CartPole-v1 默认 max_episode_steps=500，跑满即成功
+        return steps >= 500

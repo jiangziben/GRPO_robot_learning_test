@@ -47,6 +47,7 @@ def test(env_name: str, policy_name: str, model_path: str, num_episodes: int = 1
                mode="offline")
 
     episode_rewards = []
+    success_count = 0
     for ep in range(num_episodes):
         state = env.reset()
         done = False
@@ -62,8 +63,16 @@ def test(env_name: str, policy_name: str, model_path: str, num_episodes: int = 1
             except Exception:
                 pass
         episode_rewards.append(total_reward)
-        wandb.log({"total_reward": total_reward, "steps": steps}, step=ep)
-        print(f"Episode {ep+1}: Total Reward = {total_reward:.2f}, Steps = {steps}")
+
+        success = env_cls.is_success(state, steps, done)
+        wandb.log({"total_reward": total_reward, "steps": steps,
+                   "success": int(success)}, step=ep)
+        if success:
+            success_count += 1
+        print(f"Episode {ep+1}: Total Reward = {total_reward:.2f}, "
+              f"Steps = {steps}, Success = {success}")
+
+    print(f"Success rate: {success_count/num_episodes*100:.2f}%")
 
     avg_reward = sum(episode_rewards) / len(episode_rewards)
     print(f"Average Reward over {num_episodes} episodes: {avg_reward:.2f}")

@@ -3,7 +3,7 @@
     "env": "cartpole",
     "policy": "PolicyNet",
     "save_path": "weights/grpo_cartpole_policy_final.pth",
-    "num_envs": 20,
+    "num_envs": 64,
     "max_steps": 500,
     "lr": 0.02,
     "n_iterations": 20,

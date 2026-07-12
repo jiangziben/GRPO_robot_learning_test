@@ -45,6 +45,20 @@ class BaseEnv:
         """
         raise NotImplementedError
 
+    @staticmethod
+    def is_success(state, steps: int, done: bool) -> bool:
+        """判断单个 episode 是否成功。子类可重写。
+
+        Args:
+            state: episode 结束时的状态（gym step 返回的 observation）
+            steps: episode 运行的步数
+            done:  是否因环境终止条件而结束
+
+        Returns:
+            是否判定为成功
+        """
+        return False
+
     def close(self):
         self.envs.close()
 
