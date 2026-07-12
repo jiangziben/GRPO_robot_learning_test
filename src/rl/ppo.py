@@ -37,13 +37,14 @@ class PPO:
     # ------------------------------------------------------------------
     # GAE 计算
     # ------------------------------------------------------------------
-    def compute_gae(self, rewards, values, dones):
+    def compute_gae(self, rewards, values, dones, mask):
         """计算 GAE advantages 和 returns。
 
         Args:
             rewards:  [B, T] 每步奖励
-            values:   [B, T] 每步的状态价值 V(s_t)
+            values:   [B, T+1] 每步的状态价值 V(s_t)，最后一个是 bootstrap 值
             dones:    [B, T] 每步的终止标志（1=终止, 0=未终止）
+            mask:     [B, T] 有效转移标志（1=有效, 0=僵尸步）
 
         Returns:
             advantages: [B, T]
@@ -61,7 +62,9 @@ class PPO:
             gae = delta + self.gamma * self.lmbda * next_non_terminal * gae
             advantages[:, t] = gae
 
-        returns = advantages + values[:, :T]
+        # 用 mask 清零僵尸步的 advantage（auto-reset 后的无效转移）
+        advantages = advantages * mask
+        returns = advantages + values[:, :T] * mask
         return advantages, returns
 
     # ------------------------------------------------------------------
@@ -73,7 +76,7 @@ class PPO:
         Args:
             actor:        策略网络（nn.Module）
             critic:       价值网络（nn.Module），输出 V(s)
-            trajectories: collect_ppo_trajectories 返回的 dict
+            trajectories: collect_step_data 返回的 dict
 
         Returns:
             actor_loss:  最后一轮 actor 损失
@@ -85,6 +88,7 @@ class PPO:
         all_actions = trajectories["all_actions"]            # [B, T] or [B, T, act_dim]
         all_rewards = trajectories["all_rewards"]            # [B, T]
         all_dones = trajectories["all_dones"]                # [B, T]
+        all_masks = trajectories["all_masks"]                # [B, T]
 
         # 计算 values（no_grad：GAE 用旧 critic 值，不参与当前计算图）
         with torch.no_grad():
@@ -94,11 +98,19 @@ class PPO:
         # 拼接 values 用于 GAE（需要 V(s_T) 作为最后一步的 bootstrap）
         values_with_bootstrap = torch.cat([values, next_values[:, -1:]], dim=1)  # [B, T+1]
 
-        advantages, returns = self.compute_gae(all_rewards, values_with_bootstrap, all_dones)
-        # advantages, returns: [B, T]
+        advantages, returns = self.compute_gae(
+            all_rewards, values_with_bootstrap, all_dones, all_masks)
+        # advantages, returns: [B, T]，僵尸步已被清零
 
-        # 标准化 advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        # 标准化 advantages（仅对有效步）
+        valid_count = all_masks.sum()
+        if valid_count > 1:
+            adv_mean = (advantages * all_masks).sum() / valid_count
+            adv_var = ((advantages - adv_mean) ** 2 * all_masks).sum() / valid_count
+            adv_std = torch.sqrt(adv_var + 1e-8)
+            advantages = (advantages - adv_mean) / adv_std * all_masks
+
+        mask_expanded = all_masks.unsqueeze(-1)                  # [B, T, 1]
 
         actor_loss = None
         critic_loss = None
@@ -114,15 +126,18 @@ class PPO:
                 new_log_probs = dist.log_prob(all_actions)                             # [B, T, act_dim]
                 old_log_probs = all_log_probs
 
-            ratio = torch.exp(new_log_probs - old_log_probs)                           # [B, T, 1]
+            ratio = torch.exp(new_log_probs - old_log_probs)                           # [B, T, 1] or [B, T, act_dim]
             adv = advantages.unsqueeze(-1)                                             # [B, T, 1]
             surr1 = ratio * adv
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * adv
-            actor_loss = torch.mean(-torch.min(surr1, surr2))
+            # 仅对有效步计算 loss
+            surr = torch.min(surr1, surr2) * mask_expanded
+            actor_loss = -surr.sum() / valid_count
 
-            # Critic loss
+            # Critic loss（仅对有效步）
             current_values = critic(all_states).squeeze(-1)                            # [B, T]
-            critic_loss = F.mse_loss(current_values, returns.detach())
+            critic_loss = (F.mse_loss(current_values, returns.detach(), reduction='none')
+                           * all_masks).sum() / valid_count
 
             self.actor_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()

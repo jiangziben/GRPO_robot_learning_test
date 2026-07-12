@@ -55,7 +55,7 @@ def train(algo: str, env_name: str, cfg: dict):
         print(f"  {k}: {v}")
 
     max_steps = cfg["max_steps"]
-    iteration_num = cfg["iteration_num"]
+    train_steps = cfg["train_steps"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     policy = policy_cls(env.state_dim, env.action_dim).to(device)
@@ -79,7 +79,7 @@ def train(algo: str, env_name: str, cfg: dict):
     return_list = []
     start = time.time()
 
-    for i_iter in tqdm(range(iteration_num)):
+    for i_iter in tqdm(range(train_steps)):
         if algo == "grpo":
             trajectories, episode_rewards = env.collect_trajectories(
                 policy, max_steps, device=device)

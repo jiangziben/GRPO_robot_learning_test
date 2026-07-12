@@ -150,7 +150,7 @@ python test.py --config ppo_pendulum.json --model weights/my_model.pth
     "policy": "PolicyNet",
     "save_path": "weights/grpo_cartpole_policy_final.pth",
     "num_envs": 20,
-    "iteration_num": 100,
+    "train_steps": 100,
     "max_steps": 500,
     "lr": 0.02,
     "n_iterations": 20,
@@ -165,7 +165,7 @@ python test.py --config ppo_pendulum.json --model weights/my_model.pth
 | 参数 | CartPole | Pendulum |
 |------|----------|----------|
 | num_envs | 20 | 100 |
-| iteration_num | 100 | 500 |
+| train_steps | 100 | 500 |
 | max_steps | 500 | 500 |
 | lr | 0.02 | 0.001 |
 | n_iterations | 20 | 20 |
@@ -177,7 +177,7 @@ python test.py --config ppo_pendulum.json --model weights/my_model.pth
 | 参数 | CartPole | Pendulum |
 |------|----------|----------|
 | num_envs | 20 | 20 |
-| iteration_num | 200 | 500 |
+| train_steps | 200 | 500 |
 | max_steps | 500 | 500 |
 | actor_lr | 0.001 | 0.0001 |
 | critic_lr | 0.01 | 0.005 |

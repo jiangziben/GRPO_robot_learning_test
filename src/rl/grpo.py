@@ -39,12 +39,12 @@ class GRPO:
         """计算标准化 advantage（GRPO 核心：组内相对奖励标准化）。
 
         Args:
-            trajectories: dict，包含 "normalized_rewards"，shape [batch_size]
+            trajectories: dict，包含 "episode_rewards"，shape [batch_size]
 
         Returns:
             advantages: shape [batch_size]
         """
-        rewards = trajectories["normalized_rewards"]
+        rewards = trajectories["episode_rewards"]
         mean = torch.mean(rewards)
         std = torch.std(rewards) + 1e-8
         return (rewards - mean) / std
@@ -63,6 +63,10 @@ class GRPO:
         all_states = trajectories["all_states"]
         all_log_probs = trajectories["all_log_probs"]
         all_actions = trajectories["all_actions"]
+        all_masks = trajectories["all_masks"]                              # [B, T]
+
+        mask_expanded = all_masks.unsqueeze(-1)                            # [B, T, 1]
+        valid_count = mask_expanded.sum()
 
         for _ in range(self.n_iterations):
             if self.discrete:
@@ -80,8 +84,17 @@ class GRPO:
             adv = advantages.unsqueeze(1)                                        # [B, 1, 1]
             surr1 = ratio * adv
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * adv
-            entropy = dist.entropy().mean()                                      # 熵正则
-            loss = torch.mean(-torch.min(surr1, surr2)) - self.entropy_coef * entropy
+            # 仅对有效步计算 loss
+            surr = torch.min(surr1, surr2) * mask_expanded
+            policy_loss = -surr.sum() / valid_count
+
+            # 熵正则（仅对有效步）
+            if self.discrete:
+                entropy_per_step = dist.entropy()                       # [B, T]
+            else:
+                entropy_per_step = dist.entropy().sum(dim=-1)           # [B, T]
+            entropy = (entropy_per_step * all_masks).sum() / valid_count
+            loss = policy_loss - self.entropy_coef * entropy
 
             self.optimizer.zero_grad()
             loss.backward()

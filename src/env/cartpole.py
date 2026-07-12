@@ -9,8 +9,7 @@ class CartPoleEnv(BaseEnv):
     env_name = "CartPole-v1"
     discrete = True
 
-    def reward(self, next_states, rewards, dones, all_dones):
+    def reward(self, next_states, rewards, dones):
         rewards = rewards.copy()
-        rewards[all_dones.numpy()] = 0
         rewards += -np.abs(next_states[:, 0])
         return rewards

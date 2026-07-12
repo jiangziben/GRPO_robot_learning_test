@@ -13,7 +13,7 @@ class BaseEnv:
         discrete:   True=离散动作，False=连续动作
 
     子类需实现：
-        reward(self, next_states, rewards, dones, all_dones) -> rewards
+        reward(self, next_states, rewards, dones) -> rewards
     """
 
     env_name: str
@@ -33,8 +33,16 @@ class BaseEnv:
             return self.envs.single_action_space.n
         return self.envs.single_action_space.shape[0]
 
-    def reward(self, next_states, rewards, dones, all_dones):
-        """每步 reward 变换。子类实现。"""
+    def reward(self, next_states, rewards, dones):
+        """每步 reward 变换。子类实现。
+
+        Args:
+            next_states: [B, state_dim] 转移后的状态
+            rewards:     [B] 原始 reward
+            dones:       [B] 当前步是否终止（仅标记 episode 边界，不用于清零）
+        Returns:
+            rewards:     [B] 变换后的 reward
+        """
         raise NotImplementedError
 
     def close(self):
@@ -48,8 +56,8 @@ class BaseEnv:
 
         Returns:
             trajectories:    {"all_states", "all_log_probs", "all_actions",
-                              "normalized_rewards"}
-            episode_rewards: [B] 每个 env 的累计奖励
+                              "episode_rewards", "all_masks"}
+            episode_rewards: [B] 每个 env 的累计原始奖励（仅有效步，由 mask 保证）
         """
         B = self.num_envs
         seed_num = np.random.randint(0, 1000)
@@ -58,6 +66,7 @@ class BaseEnv:
         all_states, all_actions, all_log_probs = [], [], []
         all_rewards = torch.zeros(B)
         all_dones = torch.tensor([False] * B)
+        all_masks_list = []
 
         for _ in range(num_steps):
             states_tensor = torch.tensor(states, dtype=torch.float32, device=device)
@@ -69,26 +78,36 @@ class BaseEnv:
             all_actions.append(actions)
             all_log_probs.append(log_probs)
 
+            # 记录哪些 env 在当前步是有效的（尚未终止）
+            active_mask = (~all_dones).clone().numpy()
+            all_masks_list.append(torch.tensor(active_mask, dtype=torch.float32))
+
             all_dones[dones] = True
-            rewards = self.reward(next_states, rewards, dones, all_dones)
-            all_rewards += rewards
+            rewards = self.reward(next_states, rewards, dones)
+            # 仅将有效步的 reward 累加到 episode 总和中
+            all_rewards += torch.tensor(rewards, dtype=torch.float32) * all_masks_list[-1]
 
             states = next_states
             if torch.all(all_dones):
                 break
 
-        normalized_rewards = (all_rewards / num_steps).to(device)
+        all_masks = torch.stack(all_masks_list).permute(1, 0)           # [B, T]
+
         all_states = self._pack_states(all_states, device)
         all_log_probs = self._pack_log_probs(all_log_probs, device)
         all_actions = self._pack_actions(all_actions, device)
+        all_masks = all_masks.to(device)
+
+        # episode_rewards = mask 门控下的原始奖励累加（僵尸步已被 mask 排除）
+        episode_rewards = all_rewards.to(device)
 
         trajectories = {
             "all_states": all_states,
             "all_log_probs": all_log_probs,
             "all_actions": all_actions,
-            "normalized_rewards": normalized_rewards,
+            "episode_rewards": episode_rewards,
+            "all_masks": all_masks,
         }
-        episode_rewards = normalized_rewards * num_steps
         return trajectories, episode_rewards
 
     # ------------------------------------------------------------------
@@ -99,15 +118,15 @@ class BaseEnv:
 
         Returns:
             trajectories:    {"all_states", "all_next_states", "all_log_probs",
-                              "all_actions", "all_rewards", "all_dones"}
-            episode_rewards: [B] 每个 env 的累计奖励
+                              "all_actions", "all_rewards", "all_dones", "all_masks"}
+            episode_rewards: [B] 每个 env 的累计奖励（仅有效步）
         """
         B = self.num_envs
         seed_num = np.random.randint(0, 1000)
         states = self.envs.reset(seed=[seed_num] * B)
 
         all_states, all_next_states, all_actions, all_log_probs = [], [], [], []
-        all_rewards, all_dones = [], []
+        all_rewards, all_dones, all_masks = [], [], []
         all_episode_rewards = torch.zeros(B)
         all_episode_dones = torch.tensor([False] * B)
 
@@ -122,11 +141,16 @@ class BaseEnv:
             all_actions.append(actions)
             all_log_probs.append(log_probs)
 
+            # 记录哪些 env 在当前步是有效的（尚未终止）
+            active_mask = (~all_episode_dones).clone().numpy()
+            mask_tensor = torch.tensor(active_mask, dtype=torch.float32)
+            all_masks.append(mask_tensor)
+
             all_episode_dones[dones] = True
-            rewards = self.reward(next_states, rewards, dones, all_episode_dones)
+            rewards = self.reward(next_states, rewards, dones)
             all_rewards.append(torch.tensor(rewards, dtype=torch.float32))
             all_dones.append(torch.tensor(dones, dtype=torch.float32))
-            all_episode_rewards += rewards
+            all_episode_rewards += torch.tensor(rewards, dtype=torch.float32) * mask_tensor
 
             states = next_states
             if torch.all(all_episode_dones):
@@ -138,6 +162,7 @@ class BaseEnv:
                                        device=device).permute(1, 0, 2)
         all_rewards = torch.stack(all_rewards, dim=0).permute(1, 0).to(device)
         all_dones = torch.stack(all_dones, dim=0).permute(1, 0).to(device)
+        all_masks = torch.stack(all_masks, dim=0).permute(1, 0).to(device)
         all_log_probs = self._pack_log_probs(all_log_probs, device)
         all_actions = self._pack_actions(all_actions, device)
 
@@ -148,6 +173,7 @@ class BaseEnv:
             "all_actions": all_actions,
             "all_rewards": all_rewards,
             "all_dones": all_dones,
+            "all_masks": all_masks,
         }
         episode_rewards = all_episode_rewards
         return trajectories, episode_rewards
