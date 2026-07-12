@@ -16,7 +16,7 @@ class PolicyNetContinuous(torch.nn.Module):
     def forward(self, x):
         x = F.relu(self.fc1(x))
         mu = 2.0 * torch.tanh(self.fc_mu(x))
-        std = F.softplus(self.fc_std(x))
+        std = F.softplus(self.fc_std(x)).clamp(0.05, 1.0)
         return mu, std
 
     def sample_with_log_prob(self, state_tensor):

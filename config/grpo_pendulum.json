@@ -6,8 +6,8 @@
     "num_envs": 100,
     "max_steps": 500,
     "lr": 0.001,
-    "n_iterations": 20,
+    "n_iterations": 10,
     "eps": 0.2,
-    "entropy_coef": 0.01,
+    "entropy_coef": 0.005,
     "train_steps": 500
 }
