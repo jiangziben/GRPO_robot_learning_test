@@ -11,9 +11,9 @@ import argparse
 import json
 import os
 import time
-import matplotlib.pyplot as plt
-from tqdm import tqdm
+
 import torch
+import wandb
 
 from src.env import ENV_REGISTRY
 from src.policy import POLICY_REGISTRY
@@ -50,7 +50,14 @@ def train(algo: str, env_name: str, cfg: dict):
     env = env_cls(num_envs=cfg["num_envs"])
     policy_cls = POLICY_REGISTRY[cfg["policy"]]
 
+    # 初始化 wandb（离线模式，日志按时间戳保存到 output/）
+    run_name = f"{algo}_{env_name}"
+    run_dir = os.path.join("output", "train")
+    wandb.init(project="grpo-rl", name=run_name, group="train",
+               dir=run_dir, mode="offline", config=cfg)
+
     print(f"Training {algo.upper()} on {env_cls.env_name}  [{cfg['policy']}]")
+    print(f"wandb log dir: {run_dir}/wandb/")
     for k, v in cfg.items():
         print(f"  {k}: {v}")
 
@@ -76,23 +83,31 @@ def train(algo: str, env_name: str, cfg: dict):
                         n_iterations=cfg["n_iterations"],
                         discrete=env_cls.discrete)
 
-    return_list = []
     start = time.time()
 
-    for i_iter in tqdm(range(train_steps)):
+    for i_iter in range(train_steps):
         if algo == "grpo":
             trajectories, episode_rewards = env.collect_trajectories(
                 policy, max_steps, device=device)
             loss = algo_inst.update(policy, trajectories)
-            log_str = f"loss: {loss:.4f}"
+            log_metrics = {"loss": loss}
         else:  # ppo
             trajectories, episode_rewards = env.collect_step_data(
                 policy, max_steps, device=device)
             actor_loss, critic_loss = algo_inst.update(policy, critic, trajectories)
-            log_str = f"actor_loss: {actor_loss:.4f}, critic_loss: {critic_loss:.4f}"
+            log_metrics = {"actor_loss": actor_loss,
+                           "critic_loss": critic_loss}
 
         avg_reward = (sum(episode_rewards) / len(episode_rewards)).item()
-        return_list.append(avg_reward)
+        log_metrics["avg_reward"] = avg_reward
+
+        # 监控连续策略的 sigma（防止坍缩/爆炸）
+        if not env_cls.discrete:
+            with torch.no_grad():
+                sigma = policy(trajectories["all_states"])[1].mean().item()
+            log_metrics["sigma"] = sigma
+
+        wandb.log(log_metrics)
 
         if i_iter != 0 and i_iter % 200 == 0:
             base = os.path.splitext(cfg["save_path"])[0]
@@ -100,26 +115,19 @@ def train(algo: str, env_name: str, cfg: dict):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             torch.save(policy.state_dict(), path)
 
-        tqdm.write(f"iter {i_iter:4d}, avg_reward: {avg_reward:.2f}, {log_str}")
+        if i_iter % 20 == 0:
+            print(f"iter {i_iter:4d}, avg_reward: {avg_reward:.2f}, "
+                  f"loss: {log_metrics.get('loss', log_metrics.get('actor_loss', 0)):.4f}")
 
-    print(f"used_time(s): {time.time() - start:.1f}")
+    elapsed = time.time() - start
+    print(f"used_time(s): {elapsed:.1f}")
 
     os.makedirs(os.path.dirname(cfg["save_path"]), exist_ok=True)
     torch.save(policy.state_dict(), cfg["save_path"])
     print(f"Model saved to {cfg['save_path']}")
 
     env.close()
-
-    os.makedirs("output", exist_ok=True)
-    fig_path = f"output/{algo}_{env_name}_train.png"
-    plt.plot(range(len(return_list)), return_list)
-    plt.xlabel("Iterations")
-    plt.ylabel("Avg Return")
-    plt.title(f"{algo.upper()} on {env_cls.env_name}")
-    plt.grid(True)
-    plt.savefig(fig_path)
-    plt.close()
-    print(f"Figure saved to {fig_path}")
+    wandb.finish()
 
 
 if __name__ == "__main__":

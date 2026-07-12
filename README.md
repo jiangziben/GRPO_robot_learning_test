@@ -50,7 +50,7 @@ $$\text{Advantage} = \frac{R_i - \mu_R}{\sigma_R + \epsilon}$$
 │   └── rl/                        # 强化学习算法
 │       ├── grpo.py                #   GRPO：组内标准化 + PPO clip + 熵正则
 │       └── ppo.py                 #   PPO：GAE + Actor-Critic
-├── output/                        # 训练/测试奖励曲线（自动生成）
+├── output/                        # wandb 离线日志（train/ 和 test/，各含 wandb/ 子目录）
 ├── weights/                       # 模型权重（gitignore）
 └── doc/                           # 实验素材
 ```
@@ -100,7 +100,7 @@ config.json  →  train.py  →  ENV_REGISTRY[env]  →  env.collect_*()
 - PyTorch 2.0+
 - Gym 0.25.2
 - NumPy 1.23.5（必须锁定版本，gym 0.25.2 不兼容 NumPy 2.x / 1.24+）
-- Matplotlib
+- Wandb（日志记录，离线模式）
 - tqdm
 - Pygame（用于环境渲染）
 
@@ -128,7 +128,7 @@ python train.py
 
 输出：
 - 模型权重：`weights/{algo}_{env}_policy_final.pth`
-- 奖励曲线：`output/{algo}_{env}_train.png`
+- Wandb 日志（离线模式）：`output/train/wandb/`，可通过 VSCode 插件 **Bread Wandb Viewer** 查看
 
 ### 测试
 
@@ -139,7 +139,8 @@ python test.py --config ppo_pendulum.json --model weights/my_model.pth
 ```
 
 输出：
-- 测试奖励曲线：`output/{env}_test.png`
+- 终端打印每个 episode 的 reward 和步数
+- Wandb 日志（离线模式）：`output/test/wandb/`，可通过 VSCode 插件 **Bread Wandb Viewer** 查看
 
 ### 配置文件格式
 
@@ -168,9 +169,9 @@ python test.py --config ppo_pendulum.json --model weights/my_model.pth
 | train_steps | 100 | 500 |
 | max_steps | 500 | 500 |
 | lr | 0.02 | 0.001 |
-| n_iterations | 20 | 20 |
+| n_iterations | 20 | 10 |
 | eps | 0.2 | 0.2 |
-| entropy_coef | — | 0.01（防 sigma 坍缩） |
+| entropy_coef | — | 0.005 |
 
 ### PPO
 
@@ -188,7 +189,7 @@ python test.py --config ppo_pendulum.json --model weights/my_model.pth
 
 ## 已知局限
 
-- **GRPO + Pendulum**：Pendulum 是长时域（200 步）连续控制任务，GRPO 仅用最终 episode reward 做组内比较，缺少 per-step 信用分配，训练存在随机种子敏感性。加入熵正则（`entropy_coef=0.01`）可缓解策略坍缩，但稳定性仍不如 PPO + GAE。
+- **GRPO + Pendulum**：Pendulum 是长时域（200 步）连续控制任务，GRPO 仅用最终 episode reward 做组内比较，缺少 per-step 信用分配，稳定性不如 PPO + GAE。策略网络输出 σ 通过 `clamp(0.05, 1.0)` 防止坍缩/爆炸，配合微量熵正则（`entropy_coef=0.005`）维持探索。
 - **GRPO + CartPole**：训练稳定，收敛快，是 GRPO 的理想适用场景。
 
 ## 参考资料

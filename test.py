@@ -10,9 +10,10 @@
 import argparse
 import json
 import os
+
 import gym
 import torch
-import matplotlib.pyplot as plt
+import wandb
 
 from src.env import ENV_REGISTRY
 from src.policy import POLICY_REGISTRY
@@ -28,7 +29,10 @@ def test(env_name: str, policy_name: str, model_path: str, num_episodes: int = 1
     env_cls = ENV_REGISTRY[env_name]
     policy_cls = POLICY_REGISTRY[policy_name]
 
-    env = gym.make(env_cls.env_name, render_mode="human")
+    try:
+        env = gym.make(env_cls.env_name, render_mode="human")
+    except Exception:
+        env = gym.make(env_cls.env_name)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     policy = policy_cls(env.observation_space.shape[0],
@@ -36,6 +40,11 @@ def test(env_name: str, policy_name: str, model_path: str, num_episodes: int = 1
                           else env.action_space.shape[0])).to(device)
     policy.load_state_dict(torch.load(model_path, map_location=device))
     policy.eval()
+
+    # wandb 离线记录
+    wandb.init(project="grpo-rl", name=f"test_{env_name}", group="test",
+               dir=os.path.join("output", "test"),
+               mode="offline")
 
     episode_rewards = []
     for ep in range(num_episodes):
@@ -48,22 +57,19 @@ def test(env_name: str, policy_name: str, model_path: str, num_episodes: int = 1
             state, reward, done, _ = env.step(action)
             total_reward += reward
             steps += 1
-            env.render()
+            try:
+                env.render()
+            except Exception:
+                pass
         episode_rewards.append(total_reward)
+        wandb.log({"total_reward": total_reward, "steps": steps}, step=ep)
         print(f"Episode {ep+1}: Total Reward = {total_reward:.2f}, Steps = {steps}")
-    env.close()
 
-    os.makedirs("output", exist_ok=True)
-    fig_path = f"output/{env_name}_test.png"
-    plt.figure(figsize=(8, 4))
-    plt.plot(range(1, num_episodes + 1), episode_rewards, marker="o", linestyle="-")
-    plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
-    plt.title(f"Test Rewards on {env_cls.env_name}")
-    plt.grid(True)
-    plt.savefig(fig_path)
-    plt.close()
-    print(f"Figure saved to {fig_path}")
+    avg_reward = sum(episode_rewards) / len(episode_rewards)
+    print(f"Average Reward over {num_episodes} episodes: {avg_reward:.2f}")
+
+    env.close()
+    wandb.finish()
 
 
 if __name__ == "__main__":
